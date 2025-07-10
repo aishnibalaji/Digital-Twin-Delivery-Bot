@@ -1,0 +1,121 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/floors/protos/RectangleArena.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/robots/robotis/turtlebot/protos/TurtleBot3Burger.proto"
+
+WorldInfo {
+}
+Viewpoint {
+  orientation -0.5900382085004665 0.5337994923830212 0.6057334516445241 2.138986535638068
+  position 0.0033379885863042405 3.9667403068799314 4.365218471456156
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+}
+RectangleArena {
+  floorSize 4 4
+  floorTileSize 1 1
+  wallHeight 0.2
+}
+TurtleBot3Burger {
+  translation 0 0.16 0
+  controller "my_controller"
+}
+Solid {
+  translation 1 0.005 1
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0 1 0
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 1 0.01 1
+      }
+    }
+  ]
+  name "pickup_zone"
+  boundingObject Box {
+    size 1 0.01 1
+  }
+}
+Solid {
+  translation -1 0.005 -1
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 1 0 0
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 1 0.01 1
+      }
+    }
+  ]
+  name "dropoff_zone"
+  boundingObject Box {
+    size 1 0.01 1
+  }
+}
+Solid {
+  translation 0.8 0.1 -0.5
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.8 0.6 0.4
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.2 0.2 0.2
+      }
+    }
+  ]
+  name "obstacle_1"
+  boundingObject Box {
+    size 0.2 0.2 0.2
+  }
+}
+Solid {
+  translation -0.3 0.1 0.8
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.8 0.6 0.4
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.3 0.2 0.3
+      }
+    }
+  ]
+  name "obstacle_2"
+  boundingObject Box {
+    size 0.3 0.2 0.3
+  }
+}
+Solid {
+  translation 0.2 0.15 1.3
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.8 0.6 0.4
+        roughness 1
+        metalness 0
+      }
+      geometry Box {
+        size 0.2 0.3 0.2
+      }
+    }
+  ]
+  name "obstacle_3"
+  boundingObject Box {
+    size 0.2 0.3 0.2
+  }
+}

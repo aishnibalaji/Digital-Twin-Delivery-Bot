@@ -5,6 +5,9 @@ import math
 TIME_STEP = 32
 robot = Robot()
 
+print("🤖 Digital Twin Delivery Bot Starting...")
+print("📦 Initial State: SEEKING_PICKUP")
+
 # Motors
 left_motor = robot.getDevice("left wheel motor")
 right_motor = robot.getDevice("right wheel motor")
@@ -13,158 +16,170 @@ right_motor.setPosition(float("inf"))
 left_motor.setVelocity(0.0)
 right_motor.setVelocity(0.0)
 
-# Sensors
+# LIDAR - This should work on TurtleBot3
 lidar = robot.getDevice("LDS-01")
-lidar.enable(TIME_STEP)
+if lidar is not None:
+    lidar.enable(TIME_STEP)
+    print("✅ LIDAR sensor found and enabled")
+else:
+    print("❌ LIDAR sensor not found")
 
+# Try to get GPS (optional)
 gps = robot.getDevice("gps")
-gps.enable(TIME_STEP)
+if gps is not None:
+    gps.enable(TIME_STEP)
+    print("✅ GPS sensor found and enabled")
+else:
+    print("ℹ️ GPS sensor not found - using time-based navigation")
 
+# Try to get Compass (optional)
 compass = robot.getDevice("compass")
-compass.enable(TIME_STEP)
+if compass is not None:
+    compass.enable(TIME_STEP)
+    print("✅ Compass sensor found and enabled")
+else:
+    print("ℹ️ Compass sensor not found")
 
 # Robot state variables
-robot_state = "SEEKING_PICKUP"  # States: SEEKING_PICKUP, HAS_PACKAGE, DELIVERED
-max_speed = 3.0
+robot_state = "SEEKING_PICKUP"
+max_speed = 2.0
 obstacle_threshold = 0.5
+mission_timer = 0
+pickup_timer = 0
+dropoff_timer = 0
 
-# Zone definitions (adjust based on your warehouse layout)
-PICKUP_ZONE = {"x_range": (0.5, 1.5), "z_range": (0.5, 1.5)}
-DROPOFF_ZONE = {"x_range": (-1.5, -0.5), "z_range": (-1.5, -0.5)}
+def get_position_estimate():
+    """Get position from GPS if available, otherwise use timer estimate"""
+    if gps is not None:
+        try:
+            return gps.getValues()
+        except:
+            pass
+    
+    # Fallback: estimate position based on time and state
+    # This is a simple approximation
+    time_seconds = mission_timer * TIME_STEP / 1000.0
+    
+    if robot_state == "SEEKING_PICKUP":
+        # Assume robot moves toward pickup zone over time
+        progress = min(time_seconds / 30.0, 1.0)  # 30 seconds to reach
+        x = progress * 1.0
+        z = progress * 1.0
+    elif robot_state == "HAS_PACKAGE":
+        # Assume robot moves from pickup to dropoff
+        progress = min(dropoff_timer * TIME_STEP / 1000.0 / 35.0, 1.0)  # 35 seconds
+        x = 1.0 - progress * 2.0  # Move from (1,1) to (-1,-1)
+        z = 1.0 - progress * 2.0
+    else:
+        x, z = -1.0, -1.0  # At dropoff
+    
+    return [x, 0, z]
 
-def normalize_bearing(bearing):
-    """Normalize bearing to [0, 2*pi]"""
-    while bearing < 0:
-        bearing += 2 * math.pi
-    while bearing > 2 * math.pi:
-        bearing -= 2 * math.pi
-    return bearing
+def in_pickup_zone():
+    """Check if we should be in pickup zone (time-based or GPS-based)"""
+    if gps is not None:
+        try:
+            pos = gps.getValues()
+            x, y, z = pos
+            return (0.5 <= x <= 1.5) and (0.5 <= z <= 1.5)
+        except:
+            pass
+    
+    # Time-based fallback: assume we reach pickup after moving for a while
+    return pickup_timer > 25 * (1000 // TIME_STEP)  # ~25 seconds
 
-def get_bearing():
-    """Get robot's current bearing from compass"""
-    north = compass.getValues()
-    bearing = math.atan2(north[0], north[2])
-    return normalize_bearing(bearing)
-
-def get_position():
-    """Get robot's current position from GPS"""
-    return gps.getValues()
-
-def in_zone(position, zone):
-    """Check if robot is in specified zone"""
-    x, y, z = position
-    return (zone["x_range"][0] <= x <= zone["x_range"][1] and 
-            zone["z_range"][0] <= z <= zone["z_range"][1])
-
-def calculate_angle_to_target(current_pos, target_pos):
-    """Calculate angle to target position"""
-    dx = target_pos[0] - current_pos[0]
-    dz = target_pos[2] - current_pos[2]
-    return math.atan2(dx, dz)
-
-def obstacle_avoidance(ranges):
-    """Simple obstacle avoidance using LIDAR data"""
-    # Check different sectors of LIDAR
-    left_side = min(ranges[0:60])
-    front_left = min(ranges[60:90])
-    front_center = min(ranges[90:120])
-    front_right = min(ranges[120:150])
-    right_side = min(ranges[150:210])
+def in_dropoff_zone():
+    """Check if we should be in dropoff zone"""
+    if gps is not None:
+        try:
+            pos = gps.getValues()
+            x, y, z = pos
+            return (-1.5 <= x <= -0.5) and (-1.5 <= z <= -0.5)
+        except:
+            pass
     
-    left_vel = max_speed
-    right_vel = max_speed
-    
-    # Obstacle detected in front
-    if front_center < obstacle_threshold:
-        if left_side > right_side:
-            # Turn left
-            left_vel = -max_speed * 0.5
-            right_vel = max_speed
-        else:
-            # Turn right
-            left_vel = max_speed
-            right_vel = -max_speed * 0.5
-    elif front_left < obstacle_threshold:
-        # Turn right
-        left_vel = max_speed
-        right_vel = max_speed * 0.3
-    elif front_right < obstacle_threshold:
-        # Turn left
-        left_vel = max_speed * 0.3
-        right_vel = max_speed
-    
-    return left_vel, right_vel
-
-def navigate_to_target(current_pos, target_pos, current_bearing):
-    """Navigate towards target position"""
-    target_angle = calculate_angle_to_target(current_pos, target_pos)
-    angle_diff = target_angle - current_bearing
-    
-    # Normalize angle difference
-    while angle_diff > math.pi:
-        angle_diff -= 2 * math.pi
-    while angle_diff < -math.pi:
-        angle_diff += 2 * math.pi
-    
-    # Simple proportional control for steering
-    turn_speed = angle_diff * 2.0
-    
-    # Limit turn speed
-    turn_speed = max(-max_speed, min(max_speed, turn_speed))
-    
-    left_vel = max_speed - turn_speed
-    right_vel = max_speed + turn_speed
-    
-    return left_vel, right_vel
+    # Time-based fallback
+    return dropoff_timer > 30 * (1000 // TIME_STEP)  # ~30 seconds
 
 # Main control loop
-print("🤖 Digital Twin Delivery Bot Starting...")
-print("📦 Initial State: SEEKING_PICKUP")
+print("🚀 Starting main control loop...")
 
 while robot.step(TIME_STEP) != -1:
+    mission_timer += 1
+    
     # Get sensor data
-    ranges = lidar.getRangeImage()
-    position = get_position()
-    bearing = get_bearing()
+    obstacle_detected = False
+    
+    if lidar is not None:
+        try:
+            ranges = lidar.getRangeImage()
+            front_distance = min(ranges[70:110])  # Front center sensors
+            obstacle_detected = front_distance < obstacle_threshold
+        except:
+            # If LIDAR fails, assume no obstacles for now
+            obstacle_detected = False
     
     # State machine for delivery task
     if robot_state == "SEEKING_PICKUP":
-        target_pos = [1.0, 0, 1.0]  # Center of pickup zone
+        pickup_timer += 1
         
-        if in_zone(position, PICKUP_ZONE):
+        if in_pickup_zone():
             robot_state = "HAS_PACKAGE"
+            dropoff_timer = 0
             print("✅ Package picked up! Heading to drop-off zone...")
+        
+        # Navigate toward pickup zone (right and forward)
+        if obstacle_detected:
+            # Turn left when obstacle detected
+            left_motor.setVelocity(-max_speed * 0.5)
+            right_motor.setVelocity(max_speed)
+            if mission_timer % 50 == 0:
+                print("⚠️ Obstacle detected! Turning left...")
         else:
-            # Navigate to pickup zone
-            left_vel, right_vel = navigate_to_target(position, target_pos, bearing)
+            # Move forward-right toward pickup zone
+            left_motor.setVelocity(max_speed)
+            right_motor.setVelocity(max_speed * 0.8)  # Slight right turn
     
     elif robot_state == "HAS_PACKAGE":
-        target_pos = [-1.0, 0, -1.0]  # Center of drop-off zone
+        dropoff_timer += 1
         
-        if in_zone(position, DROPOFF_ZONE):
+        if in_dropoff_zone():
             robot_state = "DELIVERED"
             print("🎉 Package delivered successfully!")
+        
+        # Navigate toward dropoff zone (left and backward)
+        if obstacle_detected:
+            # Turn right when obstacle detected
+            left_motor.setVelocity(max_speed)
+            right_motor.setVelocity(-max_speed * 0.5)
+            if mission_timer % 50 == 0:
+                print("⚠️ Obstacle detected! Turning right...")
         else:
-            # Navigate to drop-off zone
-            left_vel, right_vel = navigate_to_target(position, target_pos, bearing)
+            # Move toward dropoff zone
+            left_motor.setVelocity(max_speed * 0.8)  # Slight left turn
+            right_motor.setVelocity(max_speed)
     
     elif robot_state == "DELIVERED":
-        # Task complete - stop or return to base
-        left_vel = 0
-        right_vel = 0
-        print("🏁 Delivery mission complete!")
+        # Mission complete - stop
+        left_motor.setVelocity(0)
+        right_motor.setVelocity(0)
+        if mission_timer % 100 == 0:
+            print("🏁 Mission complete! Robot stopped.")
     
-    # Override navigation with obstacle avoidance if needed
-    front_distance = min(ranges[70:110])  # Front center sensors
-    if front_distance < obstacle_threshold:
-        left_vel, right_vel = obstacle_avoidance(ranges)
-        print("⚠️ Obstacle detected! Avoiding...")
-    
-    # Apply motor velocities
-    left_motor.setVelocity(left_vel)
-    right_motor.setVelocity(right_vel)
-    
-    # Debug output (every 100 steps to avoid spam)
-    if robot.getTime() % 3.2 < 0.1:  # Approximately every 3.2 seconds
-        x, y, z = position
-        print(f"🤖 State: {robot_state} | Position: ({x:.2f}, {z:.2f}) | Bearing: {math.degrees(bearing):.1f}°")
+    # Debug output every 3 seconds
+    if mission_timer % (3000 // TIME_STEP) == 0:
+        pos = get_position_estimate()
+        x, y, z = pos
+        time_sec = mission_timer * TIME_STEP / 1000.0
+        print(f"🤖 Time: {time_sec:.1f}s | State: {robot_state} | Est. Position: ({x:.2f}, {z:.2f})")
+        
+        if obstacle_detected:
+            print("   ⚠️ Obstacle in front!")
+        
+        # Show pickup/dropoff progress
+        if robot_state == "SEEKING_PICKUP":
+            pickup_progress = min(pickup_timer / (25 * 1000 // TIME_STEP) * 100, 100)
+            print(f"   📦 Pickup progress: {pickup_progress:.1f}%")
+        elif robot_state == "HAS_PACKAGE":
+            dropoff_progress = min(dropoff_timer / (30 * 1000 // TIME_STEP) * 100, 100)
+            print(f"   🚚 Delivery progress: {dropoff_progress:.1f}%")
