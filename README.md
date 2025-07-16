@@ -23,7 +23,7 @@ Simulate a small warehouse delivery robot that navigates from point A to B, avoi
 | Control Logic   | Webots API           |
 | Sensors         | LIDAR (LDS-01)       |
 | Visualization   | Webots 3D Viewer     |
-| Optional UI     | Streamlit (for dashboard) |
+| UI              | Streamlit (for dashboard) |
 
 ---
 
